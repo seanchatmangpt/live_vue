@@ -11,7 +11,16 @@ defmodule LiveVue.RuntimeReceipt do
   @enforce_keys [:digest, :subject, :action, :correlation_id]
   defstruct [:digest, :subject, :action, :correlation_id, phase: :construct, actuation_performed: false]
 
-  @spec issue(RuntimeRequest.t()) :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          digest: String.t(),
+          subject: String.t(),
+          action: atom() | String.t(),
+          correlation_id: String.t(),
+          phase: :construct,
+          actuation_performed: false
+        }
+
+  @spec issue(RuntimeRequest.t()) :: t()
   def issue(%RuntimeRequest{} = request) do
     body = {
       request.subject,
@@ -36,7 +45,7 @@ defmodule LiveVue.RuntimeReceipt do
     }
   end
 
-  @spec replay?(RuntimeRequest.t(), %__MODULE__{}) :: boolean()
+  @spec replay?(RuntimeRequest.t(), t()) :: boolean()
   def replay?(%RuntimeRequest{} = request, %__MODULE__{} = receipt) do
     issued = issue(request)
 
