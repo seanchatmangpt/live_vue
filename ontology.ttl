@@ -1,0 +1,19 @@
+@prefix rt: <https://ggen.dev/ontology/runtime-integration#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+
+rt:liveVue a rt:Integration ;
+  rt:hasSubject rt:liveVueSubject ;
+  rt:hasAuthorityPolicy rt:liveVuePolicy ;
+  rt:runtimeConfig "live_vue.public_runtime_config" ;
+  rt:hasConfigDigest "live-vue-public-runtime-config-v1" ;
+  rt:apiModule "LiveVue.ServerOperation.Plug" ;
+  rt:route "/live_vue/operations/:id" ;
+  rt:httpMethod "POST" .
+
+rt:liveVueSubject
+  dct:identifier "ff9e17f58abab2fa39365c649535283a8d536f54" ;
+  dct:isPartOf "seanchatmangpt/live_vue" ;
+  dct:source "main" .
+
+rt:liveVuePolicy odrl:permission [ odrl:action odrl:use ] .

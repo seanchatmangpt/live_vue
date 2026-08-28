@@ -1,0 +1,44 @@
+[project]
+name = "live-vue-runtime-integration"
+version = "26.8.27"
+
+[ontology]
+source = "ontology.ttl"
+
+[templates]
+dir = "templates"
+
+[generation]
+output_dir = "."
+
+[[generation.rules]]
+name = "exact-subject"
+query = { file = "queries/01-exact-subject.rq" }
+template = { file = "templates/exact_subject.ex.tmpl" }
+output_file = "lib/live_vue/generated/exact_subject.ex"
+mode = "Overwrite"
+skip_empty = true
+
+[[generation.rules]]
+name = "authority-gate"
+query = { file = "queries/02-authority-policy.rq" }
+template = { file = "templates/authority_gate.ex.tmpl" }
+output_file = "lib/live_vue/generated/authority_gate.ex"
+mode = "Overwrite"
+skip_empty = true
+
+[[generation.rules]]
+name = "api-contract"
+query = { file = "queries/11-api.rq" }
+template = { file = "templates/api_contract.ex.tmpl" }
+output_file = "lib/live_vue/generated/api_contract.ex"
+mode = "Overwrite"
+skip_empty = true
+
+[[generation.rules]]
+name = "runtime-config"
+query = { file = "queries/24-runtime-config.rq" }
+template = { file = "templates/runtime_config.ex.tmpl" }
+output_file = "lib/live_vue/generated/runtime_config.ex"
+mode = "Overwrite"
+skip_empty = true

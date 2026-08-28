@@ -1,0 +1,10 @@
+defmodule Ggen.RuntimeIntegration.ExactSubject do
+  @moduledoc false
+  @repo {{ repo | json_encode }}
+  @base {{ base | json_encode }}
+  @head {{ head | json_encode }}
+
+  def identity, do: %{repo: @repo, base: @base, head: @head}
+  def exact?(%{repo: @repo, base: @base, head: @head}), do: true
+  def exact?(_), do: false
+end
