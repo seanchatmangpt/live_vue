@@ -92,6 +92,8 @@ export interface SetupContext {
 export type LiveVueOptions = {
   resolve: (path: string) => ComponentOrComponentPromise | undefined | null
   setup?: (context: SetupContext) => App
+  /** Additional Vue plugins installed after LiveVue's required bridge plugin. */
+  plugins?: Plugin[]
 }
 
 export type LiveVueApp = {
