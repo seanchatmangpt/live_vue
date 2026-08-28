@@ -195,7 +195,7 @@ defmodule LiveVue.ServerOperation.Receipt do
 
   alias LiveVue.ServerOperation
 
-  @enforce_keys [:digest, :operation_id, :subject, :backend_identity, :status, :executed]
+  @enforce_keys [:digest, :operation_id, :subject, :backend_identity, :status]
   defstruct [:digest, :operation_id, :subject, :backend_identity, :correlation_id, :status, executed: true]
 
   @type t :: %__MODULE__{
