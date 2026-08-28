@@ -1,0 +1,7 @@
+defmodule Ggen.RuntimeIntegration.ApiContract do
+  @moduledoc false
+  @route {{ route | json_encode }}
+  @method {{ method | json_encode }}
+
+  def contract, do: %{route: @route, method: @method}
+end
