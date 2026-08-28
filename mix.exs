@@ -48,6 +48,7 @@ defmodule LiveVue.MixProject do
           # Advanced Topics
           "guides/architecture.md": [title: "How LiveVue Works"],
           "guides/persistent_layout.md": [title: "Persistent Layouts"],
+          "guides/nuxt_patterns.md": [title: "Nuxt-style Patterns"],
           "guides/testing.md": [title: "Testing"],
           "guides/deployment.md": [title: "Deployment"],
 
@@ -76,6 +77,7 @@ defmodule LiveVue.MixProject do
           "Advanced Topics": [
             "guides/architecture.md",
             "guides/persistent_layout.md",
+            "guides/nuxt_patterns.md",
             "guides/testing.md",
             "guides/deployment.md"
           ],
