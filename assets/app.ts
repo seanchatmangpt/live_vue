@@ -1,4 +1,4 @@
-import { type App, type Component, h } from "vue"
+import { type App, type Component, h, type Plugin } from "vue"
 import type {
   ComponentOrComponentModule,
   ComponentOrComponentPromise,
@@ -13,9 +13,11 @@ import type {
  * It's a default implementation of the `setup` option, which can be overridden.
  * If you want to override it, simply provide your own implementation of the `setup` option.
  */
-export const defaultSetup = ({ createApp, component, props, slots, plugin, el }: SetupContext) => {
+export const defaultSetup = (context: SetupContext, plugins: Plugin[] = []) => {
+  const { createApp, component, props, slots, plugin, el } = context
   const app = createApp({ render: () => h(component, props, slots) })
   app.use(plugin)
+  for (const configuredPlugin of plugins) app.use(configuredPlugin)
   app.mount(el)
   return app
 }
@@ -57,9 +59,9 @@ const resolveComponent = async (component: ComponentOrComponentModule): Promise<
   return component
 }
 
-export const createLiveVue = ({ resolve, setup }: LiveVueOptions) => {
+export const createLiveVue = ({ resolve, setup, plugins = [] }: LiveVueOptions) => {
   return {
-    setup: setup || defaultSetup,
+    setup: setup || ((context: SetupContext) => defaultSetup(context, plugins)),
     resolve: async (path: string): Promise<Component> => {
       let component = resolve(path)
       if (!component) throw new Error(`Component ${path} not found!`)

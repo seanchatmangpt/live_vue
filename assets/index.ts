@@ -23,5 +23,19 @@ export {
   type FormOptions,
   type UseLiveFormReturn,
 } from "./useLiveForm.js"
+export {
+  createNuxtPatternsPlugin,
+  defineLiveVuePlugin,
+  useLiveState,
+  useLiveAsyncData,
+  useLiveFetch,
+  useLiveRuntimeConfig,
+  type LiveRuntimeConfig,
+  type LiveAsyncStatus,
+  type LiveAsyncData,
+  type LiveAsyncHandler,
+  type LiveFetchOptions,
+  type NuxtPatternOptions,
+} from "./nuxtPatterns.js"
 export { findComponent } from "./utils.js"
 export { default as Link } from "./link.js"
