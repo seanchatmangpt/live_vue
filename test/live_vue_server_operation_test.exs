@@ -39,17 +39,30 @@ defmodule LiveVue.ServerOperationTest do
                domain: "Blog",
                resource: "Post",
                action: "create",
-               consequential: true
+               consequential: true,
+               requires_actor: true,
+               requires_tenant: true
              )
 
     assert ServerOperation.backend_identity(ash) == {:ash, "Blog", "Post", "create"}
     assert ash.consequential
+    assert ash.requires_actor
+    assert ash.requires_tenant
 
     assert {:error, :ash_action_required} =
              ServerOperation.new("posts.create", "Post@v1",
                backend: :ash,
                domain: "Blog",
                resource: "Post"
+             )
+
+    assert {:error, :invalid_actor_requirement} =
+             ServerOperation.new("posts.create", "Post@v1",
+               backend: :ash,
+               domain: "Blog",
+               resource: "Post",
+               action: "create",
+               requires_actor: :sometimes
              )
   end
 
@@ -66,6 +79,54 @@ defmodule LiveVue.ServerOperationTest do
              ServerOperation.dispatch([operation], Executor, "posts.destroy", %{}, %{test_pid: self()})
 
     refute_receive {:executed, _, _, _}
+  end
+
+  test "refuses missing required actor and tenant before the executor is invoked" do
+    operation =
+      ServerOperation.new!("posts.create", "Post@v1",
+        backend: :ash,
+        domain: "Blog",
+        resource: "Post",
+        action: "create",
+        requires_actor: true,
+        requires_tenant: true
+      )
+
+    assert {:error, :actor_required} =
+             ServerOperation.dispatch([operation], Executor, "posts.create", %{}, %{test_pid: self()})
+
+    assert {:error, :tenant_required} =
+             ServerOperation.dispatch([operation], Executor, "posts.create", %{}, %{
+               test_pid: self(),
+               actor: %{id: "user-1"}
+             })
+
+    refute_receive {:executed, _, _, _}
+  end
+
+  test "admits required actor and tenant identities from server context" do
+    operation =
+      ServerOperation.new!("posts.create", "Post@v1",
+        backend: :ash,
+        domain: "Blog",
+        resource: "Post",
+        action: "create",
+        requires_actor: true,
+        requires_tenant: true
+      )
+
+    context = %{
+      test_pid: self(),
+      actor: %{id: "user-1"},
+      tenant: "acme",
+      correlation_id: "req-context-1"
+    }
+
+    assert {:ok, %{operation: "posts.create"}, receipt} =
+             ServerOperation.dispatch([operation], Executor, "posts.create", %{"title" => "Hello"}, context)
+
+    assert_receive {:executed, ^operation, %{"title" => "Hello"}, ^context}
+    assert receipt.correlation_id == "req-context-1"
   end
 
   test "dispatches the exact admitted operation and manufactures deterministic outcome receipts" do
@@ -95,6 +156,33 @@ defmodule LiveVue.ServerOperationTest do
     assert first_receipt.executed
     assert first_receipt.correlation_id == "req-1"
     assert byte_size(first_receipt.digest) == 64
+  end
+
+  test "receipt digest binds actor and tenant without exposing their values in the public projection" do
+    operation =
+      ServerOperation.new!("posts.read", "Post@v1",
+        backend: :ash,
+        domain: "Blog",
+        resource: "Post",
+        action: "read"
+      )
+
+    assert {:ok, _, actor_one} =
+             ServerOperation.dispatch([operation], Executor, "posts.read", %{}, %{
+               actor: "user-1",
+               tenant: "acme"
+             })
+
+    assert {:ok, _, actor_two} =
+             ServerOperation.dispatch([operation], Executor, "posts.read", %{}, %{
+               actor: "user-2",
+               tenant: "acme"
+             })
+
+    refute actor_one.digest == actor_two.digest
+    public = LiveVue.ServerOperation.Receipt.to_map(actor_one)
+    refute Map.has_key?(public, :actor)
+    refute Map.has_key?(public, :tenant)
   end
 
   test "executor refusals receive an error outcome receipt" do
@@ -152,6 +240,71 @@ defmodule LiveVue.ServerOperationTest do
     assert payload["receipt"]["backend_identity"] == ["ash", "Blog", "Post", "create"]
     assert payload["receipt"]["status"] == "ok"
     assert payload["receipt"]["executed"] == true
+  end
+
+  test "HTTP clients cannot manufacture required actor or tenant identities in request body" do
+    operation =
+      ServerOperation.new!("posts.create", "Post@v1",
+        backend: :ash,
+        domain: "Blog",
+        resource: "Post",
+        action: "create",
+        requires_actor: true,
+        requires_tenant: true
+      )
+
+    opts =
+      ServerOperationPlug.init(
+        operations: [operation],
+        executor: Executor,
+        context: fn _conn -> %{test_pid: self()} end
+      )
+
+    conn =
+      :post
+      |> conn("/posts.create")
+      |> Map.put(:body_params, %{
+        "input" => %{},
+        "actor" => %{"id" => "forged"},
+        "tenant" => "forged"
+      })
+      |> ServerOperationPlug.call(opts)
+
+    assert conn.status == 403
+    assert Jason.decode!(conn.resp_body) == %{"error" => "actor_required"}
+    refute_receive {:executed, _, _, _}
+  end
+
+  test "HTTP projection admits server-derived actor and tenant context" do
+    operation =
+      ServerOperation.new!("posts.create", "Post@v1",
+        backend: :ash,
+        domain: "Blog",
+        resource: "Post",
+        action: "create",
+        requires_actor: true,
+        requires_tenant: true
+      )
+
+    opts =
+      ServerOperationPlug.init(
+        operations: [operation],
+        executor: Executor,
+        context: fn _conn ->
+          %{test_pid: self(), actor: %{id: "server-user"}, tenant: "server-tenant"}
+        end
+      )
+
+    conn =
+      :post
+      |> conn("/posts.create")
+      |> Map.put(:body_params, %{"input" => %{"title" => "Hello"}})
+      |> ServerOperationPlug.call(opts)
+
+    assert conn.status == 200
+    assert_receive {:executed, ^operation, %{"title" => "Hello"}, context}
+    assert context.actor == %{id: "server-user"}
+    assert context.tenant == "server-tenant"
   end
 
   test "HTTP projection refuses unknown operation IDs without executor actuation" do

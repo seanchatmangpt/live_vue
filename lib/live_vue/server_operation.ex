@@ -9,12 +9,25 @@ defmodule LiveVue.ServerOperation do
 
   Operation metadata never grants ambient execution authority. An operation must
   be present in the registry supplied to `dispatch/5` before an executor is called.
+  Operations may additionally require server-derived actor and tenant identities;
+  those admission checks happen before the executor boundary.
   """
 
   alias __MODULE__.Receipt
 
   @enforce_keys [:id, :subject, :backend]
-  defstruct [:id, :subject, :backend, :handler, :domain, :resource, :action, consequential: false]
+  defstruct [
+    :id,
+    :subject,
+    :backend,
+    :handler,
+    :domain,
+    :resource,
+    :action,
+    consequential: false,
+    requires_actor: false,
+    requires_tenant: false
+  ]
 
   @type backend :: :phoenix | :ash
   @type t :: %__MODULE__{
@@ -25,7 +38,9 @@ defmodule LiveVue.ServerOperation do
           domain: String.t() | nil,
           resource: String.t() | nil,
           action: String.t() | nil,
-          consequential: boolean()
+          consequential: boolean(),
+          requires_actor: boolean(),
+          requires_tenant: boolean()
         }
 
   @spec new(String.t(), String.t(), keyword()) :: {:ok, t()} | {:error, atom()}
@@ -35,7 +50,9 @@ defmodule LiveVue.ServerOperation do
     with :ok <- nonempty(id, :operation_id_required),
          :ok <- nonempty(subject, :operation_subject_required),
          :ok <- validate_backend(backend, opts),
-         :ok <- validate_consequential(opts[:consequential]) do
+         :ok <- validate_boolean_option(opts[:consequential], :invalid_consequential_flag),
+         :ok <- validate_boolean_option(opts[:requires_actor], :invalid_actor_requirement),
+         :ok <- validate_boolean_option(opts[:requires_tenant], :invalid_tenant_requirement) do
       {:ok,
        %__MODULE__{
          id: id,
@@ -45,7 +62,9 @@ defmodule LiveVue.ServerOperation do
          domain: opts[:domain],
          resource: opts[:resource],
          action: opts[:action],
-         consequential: opts[:consequential] == true
+         consequential: opts[:consequential] == true,
+         requires_actor: opts[:requires_actor] == true,
+         requires_tenant: opts[:requires_tenant] == true
        }}
     end
   end
@@ -70,17 +89,23 @@ defmodule LiveVue.ServerOperation do
   @doc """
   Dispatches an exposed operation through a consumer-owned executor.
 
-  The operation registry is the exposure boundary. Unknown operation IDs are
-  refused before the executor is invoked. Every executor attempt manufactures an
-  outcome receipt, including typed executor errors.
+  The operation registry is the exposure boundary. Unknown operation IDs and
+  missing required actor/tenant identities are refused before the executor is
+  invoked. Every executor attempt manufactures an outcome receipt, including
+  typed executor errors.
   """
   @spec dispatch([t()] | %{optional(String.t()) => t()}, module(), String.t(), term(), map()) ::
           {:ok, term(), Receipt.t()}
           | {:error, term(), Receipt.t()}
-          | {:error, :operation_not_exposed | :invalid_executor}
+          | {:error,
+             :operation_not_exposed
+             | :actor_required
+             | :tenant_required
+             | :invalid_executor}
   def dispatch(operations, executor, id, input, context \\ %{})
       when is_binary(id) and is_atom(executor) and is_map(context) do
     with {:ok, operation} <- fetch_operation(operations, id),
+         :ok <- admit_context(operation, context),
          :ok <- validate_executor(executor) do
       case executor.run(operation, input, context) do
         {:ok, result} ->
@@ -114,6 +139,19 @@ defmodule LiveVue.ServerOperation do
 
   defp fetch_operation(_, _), do: {:error, :operation_not_exposed}
 
+  defp admit_context(%__MODULE__{} = operation, context) do
+    with :ok <- require_identity(operation.requires_actor, context_identity(context, :actor), :actor_required),
+         :ok <-
+           require_identity(operation.requires_tenant, context_identity(context, :tenant), :tenant_required) do
+      :ok
+    end
+  end
+
+  defp require_identity(true, nil, reason), do: {:error, reason}
+  defp require_identity(_, _, _), do: :ok
+
+  defp context_identity(context, key), do: Map.get(context, key) || Map.get(context, Atom.to_string(key))
+
   defp validate_executor(executor) do
     if function_exported?(executor, :run, 3), do: :ok, else: {:error, :invalid_executor}
   end
@@ -130,9 +168,9 @@ defmodule LiveVue.ServerOperation do
 
   defp validate_backend(_, _), do: {:error, :unsupported_backend}
 
-  defp validate_consequential(nil), do: :ok
-  defp validate_consequential(value) when is_boolean(value), do: :ok
-  defp validate_consequential(_), do: {:error, :invalid_consequential_flag}
+  defp validate_boolean_option(nil, _reason), do: :ok
+  defp validate_boolean_option(value, _reason) when is_boolean(value), do: :ok
+  defp validate_boolean_option(_value, reason), do: {:error, reason}
 
   defp nonempty(value, _) when is_binary(value) and byte_size(value) > 0, do: :ok
   defp nonempty(_, reason), do: {:error, reason}
@@ -172,12 +210,15 @@ defmodule LiveVue.ServerOperation.Receipt do
 
   @spec issue(ServerOperation.t(), term(), map(), {:ok, term()} | {:error, term()}) :: t()
   def issue(%ServerOperation{} = operation, input, context, outcome) when is_map(context) do
-    correlation_id = Map.get(context, :correlation_id) || Map.get(context, "correlation_id")
+    correlation_id = context_identity(context, :correlation_id)
+    actor = context_identity(context, :actor)
+    tenant = context_identity(context, :tenant)
     backend_identity = ServerOperation.backend_identity(operation)
     status = if match?({:ok, _}, outcome), do: :ok, else: :error
 
     digest =
-      {operation.id, operation.subject, backend_identity, operation.consequential, input, correlation_id, outcome}
+      {operation.id, operation.subject, backend_identity, operation.consequential, input, actor, tenant,
+       correlation_id, outcome}
       |> :erlang.term_to_binary([:deterministic])
       |> then(&:crypto.hash(:sha256, &1))
       |> Base.encode16(case: :lower)
@@ -205,6 +246,8 @@ defmodule LiveVue.ServerOperation.Receipt do
       executed: receipt.executed
     }
   end
+
+  defp context_identity(context, key), do: Map.get(context, key) || Map.get(context, Atom.to_string(key))
 end
 
 defmodule LiveVue.ServerOperation.Plug do
@@ -215,6 +258,10 @@ defmodule LiveVue.ServerOperation.Plug do
   `Plug.Parsers`. It can be mounted under a path such as `/live_vue/operations`
   and accepts the operation ID from `path_params["id"]`, the JSON operation
   descriptor, `operation_id`, or the remaining forwarded path segment.
+
+  Actor and tenant identities are accepted only from the server-owned context
+  callback. Client body data may supply correlation identity but cannot satisfy
+  actor or tenant admission requirements.
   """
 
   @behaviour Plug
@@ -245,6 +292,9 @@ defmodule LiveVue.ServerOperation.Plug do
 
         {:error, :operation_not_exposed} ->
           send_json(conn, 404, %{error: "operation_not_exposed"})
+
+        {:error, reason} when reason in [:actor_required, :tenant_required] ->
+          send_json(conn, 403, %{error: Atom.to_string(reason)})
 
         {:error, :invalid_executor} ->
           send_json(conn, 500, %{error: "invalid_executor"})
