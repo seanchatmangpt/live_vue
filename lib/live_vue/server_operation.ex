@@ -191,6 +191,20 @@ defmodule LiveVue.ServerOperation.Receipt do
       status: status
     }
   end
+
+  @doc "JSON-safe public receipt projection used by the HTTP seam."
+  @spec to_map(t()) :: map()
+  def to_map(%__MODULE__{} = receipt) do
+    %{
+      digest: receipt.digest,
+      operation_id: receipt.operation_id,
+      subject: receipt.subject,
+      backend_identity: Tuple.to_list(receipt.backend_identity),
+      correlation_id: receipt.correlation_id,
+      status: Atom.to_string(receipt.status),
+      executed: receipt.executed
+    }
+  end
 end
 
 defmodule LiveVue.ServerOperation.Plug do
@@ -206,6 +220,7 @@ defmodule LiveVue.ServerOperation.Plug do
   @behaviour Plug
 
   alias LiveVue.ServerOperation
+  alias LiveVue.ServerOperation.Receipt
   alias Plug.Conn
 
   @impl true
@@ -226,7 +241,7 @@ defmodule LiveVue.ServerOperation.Plug do
 
       case ServerOperation.dispatch(opts.operations, opts.executor, operation_id, input, context) do
         {:ok, result, receipt} ->
-          send_json(conn, 200, %{data: result, receipt: Map.from_struct(receipt)})
+          send_json(conn, 200, %{data: result, receipt: Receipt.to_map(receipt)})
 
         {:error, :operation_not_exposed} ->
           send_json(conn, 404, %{error: "operation_not_exposed"})
@@ -235,7 +250,7 @@ defmodule LiveVue.ServerOperation.Plug do
           send_json(conn, 500, %{error: "invalid_executor"})
 
         {:error, reason, receipt} ->
-          send_json(conn, 422, %{error: inspect(reason), receipt: Map.from_struct(receipt)})
+          send_json(conn, 422, %{error: inspect(reason), receipt: Receipt.to_map(receipt)})
       end
     else
       {:error, reason} -> send_json(conn, 400, %{error: Atom.to_string(reason)})
@@ -253,12 +268,16 @@ defmodule LiveVue.ServerOperation.Plug do
         _ -> nil
       end
 
-    id = conn.path_params["id"] || nested || Map.get(body, "operation_id") || List.last(conn.path_info)
+    id = path_param_id(conn) || nested || Map.get(body, "operation_id") || List.last(conn.path_info)
 
     if is_binary(id) and byte_size(id) > 0,
       do: {:ok, id},
       else: {:error, :operation_id_required}
   end
+
+  defp path_param_id(%Conn{path_params: %Plug.Conn.Unfetched{}}), do: nil
+  defp path_param_id(%Conn{path_params: path_params}) when is_map(path_params), do: Map.get(path_params, "id")
+  defp path_param_id(_), do: nil
 
   defp build_context(context_fun, conn, body) when is_function(context_fun, 1) do
     case context_fun.(conn) do
